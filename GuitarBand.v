@@ -1,11 +1,6 @@
 // CSCB58 Winter 2017 Final Project
-// Cave Catchers
-// Names: Nathan Seebarran, Sadman Rafid, Kareem Hage-Ali, Raphael Ambegia 
-// Description: Catch Yellows(+1)
-//					 Catch Cyans(+5!)
-//					 Avoid Reds(-10!!)
-//					 gg
-
+// GuitarBand
+// Names: Tom Sadan, Vladlen Lyudogovs'ky
 module GuitarBand
 	(
 		CLOCK_50,						//	On Board 50 MHz
@@ -103,7 +98,17 @@ module GuitarBand
         .segments(HEX1)
         );
 
-    
+		  
+		  
+	// Potential Randomly Generated Register for the lanes
+	reg[3:0] lane_register;
+	integer i;
+	initial begin 
+		for (i = 0; i < 10; i = i+1)
+		begin
+			lane_register = $random%16 // Random number between 4'b0000 and 4'b1111
+		end
+
 endmodule
 
 module datapath(
