@@ -1,0 +1,2 @@
+# GuitarBand
+We want to create a game that is similar to Guitar Hero in the sense that we will display moving blocks down a VGA output or the built in LEDs on the Altera board and the user will need to hit the blocks in a synchronized fashion. User input will initially be given using the Altera board's switches and/or buttons, but later on the goal is to replace those with a clap switch or an alternative means of input for extra fun.
