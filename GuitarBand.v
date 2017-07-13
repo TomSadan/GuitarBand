@@ -1,11 +1,6 @@
 // CSCB58 Winter 2017 Final Project
-// Cave Catchers
-// Names: Nathan Seebarran, Sadman Rafid, Kareem Hage-Ali, Raphael Ambegia 
-// Description: Catch Yellows(+1)
-//					 Catch Cyans(+5!)
-//					 Avoid Reds(-10!!)
-//					 gg
-
+// GuitarBand
+// Names: Tom Sadan, Vladlen Lyudogovs'ky
 module GuitarBand
 	(
 		CLOCK_50,						//	On Board 50 MHz
@@ -74,7 +69,7 @@ module GuitarBand
 		defparam VGA.RESOLUTION = "160x120";
 		defparam VGA.MONOCHROME = "FALSE";
 		defparam VGA.BITS_PER_COLOUR_CHANNEL = 1;
-		defparam VGA.BACKGROUND_IMAGE = "background.mif";
+		defparam VGA.BACKGROUND_IMAGE = "";
 			
 	// Put your code here. Your code should produce signals x,y,colour and writeEn/plot
 	// for the VGA controller, in addition to any other functionality your design may require.
@@ -88,7 +83,7 @@ module GuitarBand
 	assign right = KEY[2];
 	
 	
-	datapath d1(CLOCK_50, resetn, left, right, x, y, colour, data_result);
+	main m1(CLOCK_50, resetn, left, right, x, y, colour, data_result);
 
 	
 	wire [7:0] data_result;
@@ -102,11 +97,10 @@ module GuitarBand
         .hex_digit(data_result[7:4]), 
         .segments(HEX1)
         );
-
-    
 endmodule
+	
 
-module datapath(
+module main(
     input clk,
 	 input resetn,
 	 input left,
@@ -140,6 +134,30 @@ module datapath(
 	reg [7:0] x_4;
 	reg [6:0] y_4;
 
+	wire [0:0] clk_div; // Holds the value of the ratedivider clock
+	wire [3:0] new_chord; // Register to store psuedo-random 4-bit number
+	//initial begin
+		//assign new_chord = 4'b1001; // Seed for pseudo-randomness, change it later
+	//end
+	rate_divider R(.clk(clk), .d(clk_div)); // The ratedivider clock is based off the clock provided to this module
+	LFSR L(.clk(clk_div), .d(new_chord)); // Pseudo-random number generator
+	
+	// All 4 lanes of the game are stored in these registers [3 2 1 0] and they are 8-bit registers by default
+	// These 1-bit registers represent the value popped out of each register on the clock cycle
+	wire [0:0] s3_out;
+	wire [0:0] s2_out;
+	wire [0:0] s1_out;
+	wire [0:0] s0_out;
+	// These 8-bit registers represent the current values the registers hold, the 0th index being the top of the lane
+	wire [7:0] s3_byte;
+	wire [7:0] s2_byte;
+	wire [7:0] s1_byte;
+	wire [7:0] s0_byte;
+	
+	shift_register S3(.CLK(clk_div), .RST(resetn), .DATA_IN(new_chord[3]), .BIT_OUT(s3_out), .BYTE_OUT(s3_byte)); // leftmost lane
+	shift_register S2(.CLK(clk_div), .RST(resetn), .DATA_IN(new_chord[2]), .BIT_OUT(s2_out), .BYTE_OUT(s2_byte)); // second leftmost lane
+	shift_register S1(.CLK(clk_div), .RST(resetn), .DATA_IN(new_chord[1]), .BIT_OUT(s1_out), .BYTE_OUT(s1_byte)); // second rightmost lane
+	shift_register S0(.CLK(clk_div), .RST(resetn), .DATA_IN(new_chord[0]), .BIT_OUT(s0_out), .BYTE_OUT(s0_byte)); // rightmost lane
 	
 	always@(posedge clk) begin
 	    if(!resetn) begin
@@ -454,28 +472,27 @@ endmodule
 
 // hex display
 module hex_decoder(hex_digit, segments);
-    input [3:0] hex_digit;
-    output reg [6:0] segments;
-   
-    always @(*)
-        case (hex_digit)
-            4'h0: segments = 7'b100_0000;
-            4'h1: segments = 7'b111_1001;
-            4'h2: segments = 7'b010_0100;
-            4'h3: segments = 7'b011_0000;
-            4'h4: segments = 7'b001_1001;
-            4'h5: segments = 7'b001_0010;
-            4'h6: segments = 7'b000_0010;
-            4'h7: segments = 7'b111_1000;
-            4'h8: segments = 7'b000_0000;
-            4'h9: segments = 7'b001_1000;
-            4'hA: segments = 7'b000_1000;
-            4'hB: segments = 7'b000_0011;
-            4'hC: segments = 7'b100_0110;
-            4'hD: segments = 7'b010_0001;
-            4'hE: segments = 7'b000_0110;
-            4'hF: segments = 7'b000_1110;   
-            default: segments = 7'h7f;
-        endcase
+	input [3:0] hex_digit;
+	output reg [6:0] segments;
+	always @(*) begin
+		case (hex_digit)
+			4'h0: segments = 7'b100_0000;
+			4'h1: segments = 7'b111_1001;
+			4'h2: segments = 7'b010_0100;
+			4'h3: segments = 7'b011_0000;
+			4'h4: segments = 7'b001_1001;
+			4'h5: segments = 7'b001_0010;
+			4'h6: segments = 7'b000_0010;
+			4'h7: segments = 7'b111_1000;
+			4'h8: segments = 7'b000_0000;
+			4'h9: segments = 7'b001_1000;
+			4'hA: segments = 7'b000_1000;
+			4'hB: segments = 7'b000_0011;
+			4'hC: segments = 7'b100_0110;
+			4'hD: segments = 7'b010_0001;
+			4'hE: segments = 7'b000_0110;
+			4'hF: segments = 7'b000_1110;   
+			default: segments = 7'h7f;
+		endcase
+	end
 endmodule
-
