@@ -5,7 +5,6 @@
 //					 Catch Cyans(+5!)
 //					 Avoid Reds(-10!!)
 //					 gg
-
 module GuitarBand
 	(
 		CLOCK_50,						//	On Board 50 MHz
@@ -74,7 +73,7 @@ module GuitarBand
 		defparam VGA.RESOLUTION = "160x120";
 		defparam VGA.MONOCHROME = "FALSE";
 		defparam VGA.BITS_PER_COLOUR_CHANNEL = 1;
-		defparam VGA.BACKGROUND_IMAGE = "background.mif";
+		defparam VGA.BACKGROUND_IMAGE = "";
 			
 	// Put your code here. Your code should produce signals x,y,colour and writeEn/plot
 	// for the VGA controller, in addition to any other functionality your design may require.
@@ -84,11 +83,11 @@ module GuitarBand
 	
 	wire left, right;
 	
-	assign left = KEY[3];
-	assign right = KEY[2];
+	assign left = SW[2];
+	assign right = SW[0];
 	
 	
-	datapath d1(CLOCK_50, resetn, left, right, x, y, colour, data_result);
+	main m1(CLOCK_50, resetn, left, right, x, y, colour, data_result);
 
 	
 	wire [7:0] data_result;
@@ -106,7 +105,25 @@ module GuitarBand
     
 endmodule
 
-module datapath(
+`define LANE_COUNT 2
+`define LANE1_X 30
+`define LANE2_X 90
+
+`define HITBLOCK_Y 10
+
+`define RED 3'b100
+`define GREEN 3'b010
+`define BLUE 3'b001
+`define WHITE 3'b111
+`define BLACK 3'b00
+
+`define TICKS_PER_FRAME 250000
+`define LANE_LENGTH 30
+
+
+`define DRAW_COUNT 33
+
+module main(
     input clk,
 	 input resetn,
 	 input left,
@@ -116,14 +133,18 @@ module datapath(
 	 output reg [2:0] colour,
 	 output reg [7:0] data_result
     ); 
-	reg [4:0] bool;
 	 
-   // input registers
-   reg [7:0] x_pos;
-	reg [6:0] y_pos;
+	 
+	//reg [4:0] ;
+	reg pre_left;
+	reg left_click;
 	
-	reg [27:0] counter;
-	reg [27:0] counter2;
+	reg pre_right;
+	reg right_click;
+	
+	reg [27:0] frame_counter;
+	reg [3:0] lane_counter;
+	reg [4:0] draw_counter;
 	
     // output of the alu
    reg [7:0] x_alu;
@@ -133,323 +154,172 @@ module datapath(
 	reg[4:0] draw;
 	
 	// different falling blocks x and y registers
-	reg [7:0] x_2;
-	reg [6:0] y_2;
-	reg [7:0] x_3;
-	reg [6:0] y_3;
-	reg [7:0] x_4;
-	reg [6:0] y_4;
+	reg clock_div;
+	reg [7:0] blockX1;
+	reg [6:0] blockY1;
+	reg [7:0] blockX2;
+	reg [6:0] blockY2;
+	//reg [3:0] new_chord; // Register to store psuedo-random 4-bit number
+	reg [3:0] f;
+	initial begin 
+		
+		blockX1 <= `LANE1_X;
+		blockY1 <= 0;
+		blockX2 <= `LANE2_X;
+		blockY2 <= 0;
+		lane_counter <= 0;
+		frame_counter <= 0;
+		draw_counter <= 0;
+		
+		left_click <= 0;
+		pre_left <= 1;
+		right_click <= 0;
+		pre_right <= 1;
+		
+		clock_div <= 0;
+		//new_chord <= 4'b1011;
+		
+		f <= 4'b1011;
+	end
+	
+	wire [0:0] clk_div; // Holds the value of the ratedivider clock
+	//initial begin
+		//assign new_chord = 4'b1001; // Seed for pseudo-randomness, change it later
+	//end
+	//rate_divider R(.clk(clk), .d(clk_div)); // The ratedivider clock is based off the clock provided to this module
+	//LFSR L(.clk(clock_div), .d(new_chord)); // Pseudo-random number generator
 
+	// All 4 lanes of the game are stored in these registers [3 2 1 0] and they are 8-bit registers by default
+	// These 1-bit registers represent the value popped out of each register on the clock cycle
+	wire s3_out;
+	wire [0:0] s2_out;
+	wire [0:0] s1_out;
+	wire [0:0] s0_out;
+	// These 8-bit registers represent the current values the registers hold, the 7th index being the top of the lane
+	wire [`LANE_LENGTH:0] s3_byte;
+	wire [`LANE_LENGTH:0] s2_byte;
+	wire [`LANE_LENGTH:0] s1_byte;
+	wire [`LANE_LENGTH:0] s0_byte;
+	
+	shift_register S3(.CLK(clock_div), .RST(resetn), .DATA_IN(f[3]), .BIT_OUT(s3_out), .BYTE_OUT(s3_byte)); // leftmost lane
+	shift_register S2(.CLK(clock_div), .RST(resetn), .DATA_IN(f[2]), .BIT_OUT(s2_out), .BYTE_OUT(s2_byte)); // second leftmost lane
+	//shift_register S1(.CLK(clock_div), .RST(resetn), .DATA_IN(f[1]), .BIT_OUT(s1_out), .BYTE_OUT(s1_byte)); // second rightmost lane
+	//shift_register S0(.CLK(clock_div), .RST(resetn), .DATA_IN(f[0]), .BIT_OUT(s0_out), .BYTE_OUT(s0_byte)); // rightmost lane
+	
+	integer index;
 	
 	always@(posedge clk) begin
-	    if(!resetn) begin
-			  bool <= 4'd0;
-       end
-		 else if (counter == 28'd50000) begin 
-			  // set the initial position of the user's block
-			  if(x_pos == 0) begin
-						x_pos <= 30;
+		f <= { f[2:0], f[3] ^ f[2] };
+		if(draw_counter == `DRAW_COUNT) begin
+			draw_counter <= 0;
+			// If we process every lane
+			lane_counter <= lane_counter + 1;
+			if(lane_counter == `LANE_COUNT) begin
+				lane_counter <= 0;
+				// Once every lane is proccesed, increment tick
+				frame_counter <= frame_counter + 1;
+				// If we reach the ticks per frame
+				if(frame_counter == `TICKS_PER_FRAME) begin
+					frame_counter <= 0;
+					clock_div <= 1;
 				end
-				// if FSM = 0, sets the positions of the user's block
-			  if (bool == 4'd0) begin 
-					if(count == 4'd2) begin
-						// movement left of the user's block		
-						if (~left) begin
-							if(x_pos == 30) begin
-								x_pos <= 120;
-							
-							end
-						
-						else begin
-								x_pos <= x_pos - 30;
-						end
-						// movement right of the user's block
-						end if(~right) begin
-								
-								if(x_pos == 120) begin
-									x_pos <= 30;
-								end
-								else begin
-									x_pos <= x_pos + 30;
-								end
-						end
-						
-						count <= 4'd0;
-					end
+			end
+		end
+		if(frame_counter == 100000) begin
+			clock_div <= 0;
+		end
 
-					y_pos <= 100;
-					bool <= 1;
-			  end
-			  // if FSM = 1, draw the player's block and sets FSM to 3
-			  else if(bool == 4'b1) begin
-					y <= y_pos;
-					x <= x_pos;
-					colour <= 3'b111;
-					bool <= 3;
-					clear <=1;
-			  end
-				// if FSM = 4, wait state
-			  else if (bool == 4'd4) begin
-				
-					bool <= 5;
-			  end
-			  // if FSM = 10, wait state
-			  else if(bool == 4'd10) begin
-			  
-			  
-					bool <= 2;
-			  end
-			  
-			 
-			  // if FSM = 9, updates the position for the falling blocks and checks the collisions
-			  else if(bool == 4'd9) begin
-					// collision for 1st block
-					if(x_pos == x_2 && y_pos == y_2) begin
-						// update the score
-						data_result <= data_result + 1;
-						// update the position
-						if((x_pos + 30) > 120) begin
-							
-							x_2 <= 30;
-							
-						end
-						else begin
-							x_2 <= (x_pos + 30);
-						end
-						
-						y_2 <= 0;
-						
-					end
-					// collision for 2nd block
-					else if(x_pos == x_3 && y_pos == y_3) begin
-						// update the score
-						data_result <= data_result + 5;
-						// update the position
-						if((x_pos - 30) < 0) begin
-							
-							x_3 <= 120;
-							
-						end
-						else begin
-							x_3 <= (x_pos - 30);
-						end
-						
-						y_3 <= 0;
-
-					end
-					// collision for 3rd block
-					else if(x_pos == x_4 && y_pos == y_4) begin 
-						
-						// decrease the score
-						if(data_result >= 10) begin
-						
-							data_result <= data_result - 10;
-						
-						end
-						else begin
-						
-						
-							data_result <= 0;
-
-						end
-						
-						// update the position
-						if((x_2 + 30) > 120) begin
-							
-							x_4 <= 60;
-							
-						end
-						else begin
-							x_4 <= (x_2 + 30);
-						end
-						
-						y_4 <= 0;
-					
-					end
-					// if falling block reaches the bottom
-					if(y_2 == 120) begin
-					
-						// update the position
-						if((x_pos + 30) > 120 || (x_pos + 30) < 30) begin
-							
-							x_2 <= 60;
-							
-						end
-						else begin
-							x_2 <= (x_pos + 30);
-						end
-
-						y_2 <= 0;
-
-					end
-					// if falling block reaches the bottom
-					else if(y_3 == 120) begin
-
-						// update the position
-						if((x_2 - 30) > 120 ||(x_2 - 30) < 0) begin
-							x_3 <= 90;
-						end
-						else begin
-							x_3 <= (x_2 - 30);
-						end
-						
-						y_3 <= 0;
-
-					end
-					// if falling block reaches the bottom
-					else if(y_4 == 120) begin
-						// update the position
-						if((x_3 + 30) > 120 ||(x_3 + 30) < 0) begin
-							
-							x_4 <= 90;
-							
-						end
-						else begin
-							
-							x_4 <= (x_3 - 30);
-						end
-						
-						y_4 <= 0;
-					
-					end 
 		
-					bool <= 0;
-					
-			  end
-			  // if FSM = 5, wait state
-			  else if(bool == 4'd5) begin
-				
+		// Update Lane 1
+		if(lane_counter == 0) begin
+			// Detect trigger point for button
+			pre_left <= left;
+			if(left == 1 && pre_left == 0) begin
+				left_click <= 1;
+			end
+			// Draw blocks in a lane
+			if(draw_counter < `LANE_LENGTH) begin
+				x<= `LANE1_X;
+				y<= 1 + draw_counter;
+				if(s3_byte[draw_counter] == 1)
+					colour <= `RED;
+				else
+					colour <= `BLACK;
+			end
+			// Delete block hitter at the end of frame
+			if(draw_counter == `LANE_LENGTH && left_click == 0) begin
+				if (frame_counter == 0) begin
+					x <= `LANE1_X;
+					y <= `LANE_LENGTH + 1;
+					colour <= 3'b101;
+				end
+			end
+			// Draw block hitte
+			if(draw_counter == `LANE_LENGTH && left_click == 1) begin
+				x <= `LANE1_X;
+				y <= `LANE_LENGTH + 1;
+				colour <= `WHITE;
+				left_click <= 0;
+				if (s3_byte[`LANE_LENGTH] == 1)
+					data_result <= data_result + 1;
+				else
+					if(data_result > 5)
+						data_result <= data_result - 5;
+					else
+						data_result <= 0;
+			end
 
-					bool <= 6;
-			  end 
-				// if FSM = 3, animate the position of the falling blocks
-			  else if(bool == 4'd3) begin
-
-					if(x_2 <= 0) begin
-						x_2 <= 30;
-					 end
-
-					 if(x_3 <= 0) begin
-						x_3 <= 90;
-						y_3 <= 90;
-					 end
+		end
+		
+		
+		  //-----------//
+		 //    Copy   //
+		//-----------//
+		// Update Lane 2
+		/*
+		else if(lane_counter == 1) begin
+			pre_right <= right;
+			if(right == 1 && pre_right == 0) begin
+				right_click <= 1;
+			end
 	
-					 if(x_4 <= 0) begin
-						x_4 <= 120;
-						y_4 <= 100;
-					 end
-					 
-					 y_2 <= y_2 + 1;
-					 y_3 <= y_3 + 1;
-					 y_4 <= y_4 + 1;
-					 
-					 draw <= 1;
-					 bool <= 4;
-			  end
-			  // if FSM = 2, erase the previous position of the player block
-			  else if (bool == 4'd2)begin
+			if(draw_counter == 0 && right_click == 0) begin
+				if (frame_counter == 0) begin
+					x <= `LANE2_X;
+					y <= `HITBLOCK_Y;
+					colour <= `BLACK;
+				end
+			end
+			else if(draw_counter == 0 && right_click == 1) begin
+				x <= `LANE2_X;
+				y <= `HITBLOCK_Y;
+				colour <= `WHITE;
+				right_click <= 0;
+			end
+			/*
+			else if(draw_counter == 1) begin
+				x <= blockX2;
+				y <= blockY2;			
+				colour <= `GREEN;
+				if (frame_counter == 0) begin
+					blockY2 <= blockY2 + 1;		
+				end
+			end
+		
+			if(draw_counter > 3 && draw_counter < 24) begin
+				x<= `LANE2_X;
+				y<= 1 + draw_counter - 4;
+				if(s2_byte[draw_counter - 4] == 1)
+					colour <= `GREEN;
+				else
+					colour <= `BLACK;
+			end
+		end
+		*/
+		// Go to next draw
+		draw_counter <= draw_counter + 1;
+	end
 
-					x <= x_pos;
-					y <= y_pos;
-					colour <= 3'b000;
-					
-					bool <= 9;
-			  end
-			  // if FSM = 6, wait state
-			  else if (bool == 4'd6) begin
-					
-					 
-					 
-					 bool <= 7;
-			  
-			  end
-			  // if FSM = 7, wait state
-			  else if (bool == 4'd7) begin
-					bool <= 8;
-			  end
-			  // if FSM = 8, wait state
-			  else if (bool == 4'd8) begin
-				
-					bool <= 2;
-			  end
-			  
-			  
-			 
-			  
-			  // set the counter back to 0
-			  counter <= 28'd0;
-			  
-			  
-				// slow down the input, so the player block doesn't move too fast
-			  count <= count + 1;
-
-	    end
-		 
-		 else begin
-			// this block operates outside of the rate divider and used for drawing and clearing falling blocks
-			// increase counter, used as a rate divider
-		 	counter <= counter + 1;
-			
-			// if clear = 1, signal for erasing the 1st falling block
-			 if(clear == 4'd1) begin
-			  
-			  
-					x <= x_2;
-					y <= y_2;
-					
-					colour <= 1'b000;
-					clear <= 2;
-			  end
-			  // if clear = 2, signal for erasing the 2nd falling block
-			  else if(clear == 4'd2) begin
-			  
-			  
-					x <= x_3;
-					y <= y_3;
-					clear <= 3;
-			  end
-			  // if clear = 3, signal for erasing the 3rd falling block
-			  else if(clear == 4'd3) begin
-			  
-			  
-					x <= x_4;
-					y <= y_4;
-					clear <= 0;
-			  end
-			  
-			  
-			  // if draw = 1, draw the 1st falling block
-			  if(draw == 4'd1) begin
-					x <= x_2;
-					y <= y_2;
-				
-
-					colour <= 3'b110;
-					draw <= 2;
-			  
-			  end
-			  // if draw = 2, draw the 2nd falling block
-			  else if(draw == 4'd2) begin
-			  
-					x <= x_3;
-					y <= y_3;
-				
-
-					colour <= 3'b011;
-					draw <= 3;
-			  end
-			  // if draw = 3, draw the 3rd falling block
-			  else if(draw == 4'd3) begin
-			  
-					x <= x_4;
-					y <= y_4;
-				
-
-					colour <= 3'b100;
-					draw <= 0;
-			  end
-	    end
-end
 endmodule
 
 // hex display
